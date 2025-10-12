@@ -16,14 +16,18 @@ class BrivaService
     protected string $clientSecret;
     protected string $baseUrl;
     protected bool   $logging;
+    protected int    $timeout;
 
     public function __construct(BriApi $api)
     {
         $this->api             = $api;
-        $this->institutionCode = (string) config('bri.institution_code', '');
+
+        // --- Config fallback (dukung kunci lama & baru) ---
+        $this->institutionCode = (string) (config('bri.institution_code', config('bri.custcode.institution_code', '')));
         $this->brivaNo         = (string) config('bri.briva_no', '');
-        $this->clientSecret    = (string) config('bri.client_secret', '');
-        $this->baseUrl         = rtrim((string) config('bri.base_url', ''), '/');
+        $this->clientSecret    = (string) (config('bri.client_secret', config('bri.api.client_secret', '')));
+        $this->baseUrl         = rtrim((string) (config('bri.base_url', config('bri.api.base_url', ''))), '/');
+        $this->timeout         = (int) (config('bri.timeout', config('bri.api.timeout', 15)));
         $this->logging         = (bool) config('bri.log', false);
     }
 
@@ -33,26 +37,24 @@ class BrivaService
 
     protected function utcTimestamp(): string
     {
-        // BRI biasanya minta format ISO8601 / RFC3339 (Z)
-        return Carbon::now('UTC')->toRfc3339String(); // ex: 2025-10-09T02:35:10+00:00
+        // ISO8601 / RFC3339 with timezone
+        return Carbon::now('UTC')->toRfc3339String();
     }
 
     protected function normalizePath(string $path): string
     {
-        // pastikan selalu diawali '/'
         return '/' . ltrim($path, '/');
     }
 
     protected function buildStringToSign(string $method, string $path, string $accessToken, string $timestamp, string $body): string
     {
-        // NOTE: Sesuaikan dengan spesifikasi BRI kamu jika berbeda
-        // Beberapa varian pakai '&' / '\n' sebagai delimiter — tinggal ubah di sini.
+        // Sesuaikan kalau spek bank-mu beda (delimiter, urutan, dll)
         return implode('|', [$path, strtoupper($method), $accessToken, $timestamp, $body]);
     }
 
     protected function signature(string $stringToSign): string
     {
-        // HMAC-SHA256 base64
+        // HMAC-SHA256 (base64)
         $raw = hash_hmac('sha256', $stringToSign, $this->clientSecret, true);
         return base64_encode($raw);
     }
@@ -60,7 +62,7 @@ class BrivaService
     protected function request(string $method, string $path, array $body = []): array
     {
         if ($this->baseUrl === '') {
-            throw new RuntimeException('[BRI] base_url kosong. Set bri.base_url di config/.env.');
+            throw new RuntimeException('[BRI] base_url kosong. Set bri.api.base_url / bri.base_url di config/.env.');
         }
 
         $method    = strtoupper($method);
@@ -74,9 +76,9 @@ class BrivaService
 
         $url = $this->baseUrl . $path;
 
-        // Header names configurable (fallback aman)
-        $tsHeader  = (string) config('bri.headers.timestamp', 'BRI-Timestamp');
-        $sigHeader = (string) config('bri.headers.signature', 'BRI-Signature');
+        // Header names (fallback-aware)
+        $tsHeader  = (string) (config('bri.headers.timestamp', config('bri.api.headers.timestamp', 'BRI-Timestamp')));
+        $sigHeader = (string) (config('bri.headers.signature', config('bri.api.headers.signature', 'BRI-Signature')));
 
         $headers = [
             'Authorization' => 'Bearer ' . $token,
@@ -85,11 +87,13 @@ class BrivaService
             'Content-Type'  => 'application/json',
         ];
 
-        $http = $this->api->http()->withHeaders($headers);
+        $http = $this->api->http()
+            ->timeout($this->timeout)
+            ->withHeaders($headers);
 
         if ($this->logging) {
-            $maskedToken = substr($token, 0, 8) . '...' . substr($token, -4);
-            $maskedSign  = substr($sign, 0, 6) . '...';
+            $maskedToken = strlen($token) > 12 ? substr($token, 0, 8) . '...' . substr($token, -4) : $token;
+            $maskedSign  = strlen($sign) > 9 ? substr($sign, 0, 6) . '...' : $sign;
             logger()->info('[BRI][REQ]', [
                 'method'  => $method,
                 'url'     => $url,
@@ -106,7 +110,6 @@ class BrivaService
         /** @var \Illuminate\Http\Client\Response $resp */
         $resp = ($method === 'GET')
             ? $http->get($url)
-            // untuk POST/PUT/PATCH/DELETE, pakai send agar body terkirim
             : $http->send($method, $url, ['body' => $jsonBody]);
 
         if ($this->logging) {
@@ -116,22 +119,30 @@ class BrivaService
             ]);
         }
 
-        if (!$resp->successful()) {
-            // Coba refresh token 1x kalau 401
-            if ($resp->status() === 401) {
-                $token     = $this->api->getAccessToken(true);
-                $timestamp = $this->utcTimestamp();
-                $string    = $this->buildStringToSign($method, $path, $token, $timestamp, $jsonBody);
-                $sign      = $this->signature($string);
+        // One-time retry kalau expired token
+        if (!$resp->successful() && $resp->status() === 401) {
+            $token     = $this->api->getAccessToken(true);
+            $timestamp = $this->utcTimestamp();
+            $string    = $this->buildStringToSign($method, $path, $token, $timestamp, $jsonBody);
+            $sign      = $this->signature($string);
 
-                $headers['Authorization'] = 'Bearer ' . $token;
-                $headers[$tsHeader]       = $timestamp;
-                $headers[$sigHeader]      = $sign;
+            $headers['Authorization'] = 'Bearer ' . $token;
+            $headers[$tsHeader]       = $timestamp;
+            $headers[$sigHeader]      = $sign;
 
-                $http2 = $this->api->http()->withHeaders($headers);
-                $resp  = ($method === 'GET')
-                    ? $http2->get($url)
-                    : $http2->send($method, $url, ['body' => $jsonBody]);
+            $http2 = $this->api->http()
+                ->timeout($this->timeout)
+                ->withHeaders($headers);
+
+            $resp  = ($method === 'GET')
+                ? $http2->get($url)
+                : $http2->send($method, $url, ['body' => $jsonBody]);
+
+            if ($this->logging) {
+                logger()->info('[BRI][RESP-RETRY]', [
+                    'status' => $resp->status(),
+                    'body'   => $resp->json() ?? $resp->body(),
+                ]);
             }
         }
 
@@ -147,9 +158,8 @@ class BrivaService
      * ========================= */
 
     /**
-     * Buat VA untuk satu invoice.
-     * $params minimal: custCode, amount (int), nama (custName), expiredAt (Carbon|string Y-m-d H:i:s)
-     * Opsi: keterangan / description.
+     * Buat VA (opsional, hanya jika kamu memang memanggil API BRI untuk create).
+     * Plan A tetap mengandalkan webhook 'va-assigned'.
      */
     public function createVa(array $params): array
     {
@@ -167,8 +177,9 @@ class BrivaService
             ? $expiredAt->format('Y-m-d H:i:s')
             : (string) $expiredAt;
 
-        $path = (string) (config('bri.endpoints.briva_base') ?? '/v1/briva');
-        $path .= '/create';
+        // Fallback-aware endpoint
+        $base = (string) (config('bri.endpoints.briva_base', config('bri.api.endpoints.briva_base', '/v1/briva')));
+        $path = $base . '/create';
 
         $body = [
             'institutionCode' => $this->institutionCode,
@@ -185,7 +196,7 @@ class BrivaService
 
     public function getVa(string $custCode): array
     {
-        $base = (string) (config('bri.endpoints.briva_base') ?? '/v1/briva');
+        $base = (string) (config('bri.endpoints.briva_base', config('bri.api.endpoints.briva_base', '/v1/briva')));
 
         $path = $base
               . '/get/' . rawurlencode($this->institutionCode)
@@ -197,7 +208,6 @@ class BrivaService
 
     public function updateVa(array $params): array
     {
-        // BRI biasanya butuh amount/nama/expiredDate utk update
         $custCode  = (string) data_get($params, 'custCode');
         if (!$custCode) {
             throw new RuntimeException('updateVa: custCode wajib diisi.');
@@ -211,8 +221,8 @@ class BrivaService
             ? $expiredAt->format('Y-m-d H:i:s')
             : (string) $expiredAt;
 
-        $path = (string) (config('bri.endpoints.briva_base') ?? '/v1/briva');
-        $path .= '/update';
+        $base = (string) (config('bri.endpoints.briva_base', config('bri.api.endpoints.briva_base', '/v1/briva')));
+        $path = $base . '/update';
 
         $body = array_filter([
             'institutionCode' => $this->institutionCode,
@@ -228,8 +238,8 @@ class BrivaService
 
     public function deleteVa(string $custCode): array
     {
-        $path = (string) (config('bri.endpoints.briva_base') ?? '/v1/briva');
-        $path .= '/delete';
+        $base = (string) (config('bri.endpoints.briva_base', config('bri.api.endpoints.briva_base', '/v1/briva')));
+        $path = $base . '/delete';
 
         $body = [
             'institutionCode' => $this->institutionCode,
@@ -237,7 +247,6 @@ class BrivaService
             'custCode'        => $custCode,
         ];
 
-        // pakai send() supaya body terkirim untuk DELETE
         return $this->request('DELETE', $path, $body);
     }
 
@@ -245,13 +254,9 @@ class BrivaService
      * ===   Report API     ===
      * ========================= */
 
-    /**
-     * Rekonsiliasi berdasarkan tanggal (harian).
-     * Format tanggal: 'YYYY-MM-DD'
-     */
     public function getReportByDate(string $fromDate, ?string $toDate = null): array
     {
-        $path = (string) (config('bri.endpoints.report_date') ?? '/v1/briva/report');
+        $path = (string) (config('bri.endpoints.report_date', config('bri.api.endpoints.report_date', '/v1/briva/report')));
 
         $body = [
             'institutionCode' => $this->institutionCode,
@@ -263,13 +268,9 @@ class BrivaService
         return $this->request('POST', $path, $body);
     }
 
-    /**
-     * Rekonsiliasi berdasarkan waktu (jam-menit).
-     * Format datetime: 'YYYY-MM-DD HH:mm:ss'
-     */
     public function getReportByTime(string $fromDateTime, string $toDateTime): array
     {
-        $path = (string) (config('bri.endpoints.report_time') ?? '/v1/briva/report/time');
+        $path = (string) (config('bri.endpoints.report_time', config('bri.api.endpoints.report_time', '/v1/briva/report/time')));
 
         $body = [
             'institutionCode' => $this->institutionCode,
@@ -286,21 +287,27 @@ class BrivaService
      * ========================= */
 
     /**
-     * Generator custCode contoh (stabil & ringkas): NIM (max 10) + angsuran_ke (2 digit, pad-left).
-     * Pastikan total panjang custCode sesuai aturan korporatmu (umumnya 10).
+     * custCode KONSTAN = NIM (last-N). Param $angsuranKe dipertahankan demi kompatibilitas, tapi DIABAIKAN.
      */
-    public static function makeCustCode(string $nim, int $angsuranKe): string
+    public static function makeCustCode(string $nim, int $angsuranKe = 0): string
     {
+        $lastN   = (int) config('bri.custcode.last_n_digits', 10);
         $nimCore = preg_replace('/\D+/', '', $nim) ?: $nim;
-        $nimCore = substr($nimCore, -10); // ambil 10 digit terakhir kalau kepanjangan
-        return $nimCore . str_pad((string) $angsuranKe, 2, '0', STR_PAD_LEFT);
+        return $lastN > 0 ? substr($nimCore, -$lastN) : $nimCore;
     }
 
     /**
-     * Gabung brivaNo + custCode (buat ditaruh di kolom va_full).
+     * DILARANG: VA harus datang dari BRI via webhook 'va-assigned'.
+     * Prod: exception. Dev: warning (untuk deteksi pemakaian lama).
      */
     public function makeFullVa(string $custCode): string
     {
+        if (config('bri.forbid_local_va', true)) {
+            if (app()->environment('production')) {
+                throw new RuntimeException('Forbidden: local VA generation is disabled. VA must come from BRI webhook.');
+            }
+            trigger_error('Deprecated: Do NOT generate VA locally. Wait for BRI webhook.', E_USER_WARNING);
+        }
         return (string) ($this->brivaNo . $custCode);
     }
 }

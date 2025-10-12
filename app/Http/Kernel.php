@@ -59,5 +59,6 @@ class Kernel extends HttpKernel
         // === Webhook BRI (HMAC/Bearer) ===
         // Pastikan kamu sudah buat class: App\Http\Middleware\VerifyBrivaWebhook
         'briva.webhook'    => \App\Http\Middleware\VerifyBrivaWebhook::class,
+        'bri.spectate' => \App\Http\Middleware\VerifyEligibilityToken::class,
     ];
 }

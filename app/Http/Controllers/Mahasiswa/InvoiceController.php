@@ -511,7 +511,7 @@ class InvoiceController extends Controller
 
     /**
      * Generator invoice yang aman & idempotent untuk 1 mahasiswa.
-     * (DITAMBAHKAN: panggil BRIVA setelah create)
+     * (B1 FIXED: ISI HANYA va_cust_code — TIDAK generate VA lokal)
      */
     private function generateInvoicesFor(
         int $mahasiswaId,
@@ -531,7 +531,11 @@ class InvoiceController extends Controller
 
         $hasAngsKe = Schema::hasColumn('invoices', 'angsuran_ke');
 
-        return DB::transaction(function () use ($mahasiswaId, $bulanTagihan, $jumlahAngsuran, $per, $sisa, $hasAngsKe, $semesterAwal, $tahunAkademik) {
+        // Ambil cust_code (atau fallback NIM last-N) SEKALI untuk mahasiswa ini
+        $mhs = DB::table('mahasiswas')->where('id', $mahasiswaId)->select('nim','cust_code')->first();
+        $custCodeFixed = $mhs?->cust_code ?? BrivaService::makeCustCode((string) ($mhs->nim ?? $mahasiswaId));
+
+        return DB::transaction(function () use ($mahasiswaId, $bulanTagihan, $jumlahAngsuran, $per, $sisa, $hasAngsKe, $semesterAwal, $tahunAkademik, $custCodeFixed) {
             // Reset semua invoice milik mahasiswa ini (sesuai flow kamu)
             Invoice::where('mahasiswa_id', $mahasiswaId)->delete();
 
@@ -547,9 +551,12 @@ class InvoiceController extends Controller
                     'updated_at'   => now(),
                 ];
 
+                // angsuran_ke (jika ada kolomnya)
                 if ($hasAngsKe) {
                     $payload['angsuran_ke'] = $i + 1;
                 }
+
+                // metadata lain (opsional)
                 if (Schema::hasColumn('invoices', 'kode')) {
                     $payload['kode'] = Str::upper(Str::random(10));
                 }
@@ -568,13 +575,25 @@ class InvoiceController extends Controller
                     $payload['jatuh_tempo'] = Carbon::create($yr, $mnum, 5)->toDateString();
                 }
 
+                // === B1: ISI HANYA va_cust_code (kalau kolom ada). TIDAK set va_full/va_briva_no. ===
+                if (Schema::hasColumn('invoices', 'va_cust_code')) {
+                    $payload['va_cust_code'] = $custCodeFixed;
+                }
+                if (Schema::hasColumn('invoices', 'va_full')) {
+                    $payload['va_full'] = null; // biarkan diisi webhook va-assigned
+                }
+                if (Schema::hasColumn('invoices', 'va_briva_no')) {
+                    $payload['va_briva_no'] = null; // biarkan diisi webhook jika diperlukan
+                }
+                if (Schema::hasColumn('invoices', 'va_expired_at')) {
+                    $payload['va_expired_at'] = null; // menunggu info bank (opsional)
+                }
+
                 try {
                     // idempotent-safe dengan unique composite di DB
-                    $inv = Invoice::create($payload);
+                    Invoice::create($payload);
 
-                    // === Tambahan: bikin VA setelah invoice berhasil dibuat ===
-                    $angsKe = $hasAngsKe ? (int) $inv->angsuran_ke : ($i + 1);
-                    $this->createVaFor($inv, $angsKe);
+                    // ⚠️ JANGAN panggil createVaFor() / makeFullVa() — VA datang dari BRI via webhook.
                 } catch (QueryException $e) {
                     // Kalau kebentur unik (race/double submit), lanjut aja
                     if (!str_contains($e->getMessage(), 'uniq_rpl_mhs_angsuran')) {
@@ -602,62 +621,5 @@ class InvoiceController extends Controller
             }
         }
         return redirect('/mahasiswa/invoices');
-    }
-
-    /* ==================== BRIVA HELPERS ==================== */
-
-    /**
-     * Buat VA untuk satu invoice RPL (aman: try/catch, cek kolom sebelum update).
-     */
-    private function createVaFor(Invoice $invoice, int $angsuranKe): void
-    {
-        try {
-            // Ambil mahasiswa aktif dari guard; fallback aman kalau beda konteks
-            $mahasiswa = Auth::guard('mahasiswa')->user();
-
-            // Kalau guard kosong atau bukan pemilik invoice, minimal isi nama NIM dari kolom relasi kalau ada
-            $nim  = (string) ($mahasiswa->nim ?? '');
-            $nama = (string) ($mahasiswa->nama ?? 'Mahasiswa');
-
-            // CustCode stabil: NIM + angsuran_ke (2 digit). Jika NIM kosong, pakai ID invoice sebagai fallback.
-            if ($nim === '') {
-                $nim = (string) ($invoice->mahasiswa_id ?? '0000');
-            }
-            $custCode = BrivaService::makeCustCode($nim, $angsuranKe);
-
-            // Expired pakai jatuh_tempo (endOfDay) kalau ada; fallback +7 hari
-            $expired = !empty($invoice->jatuh_tempo)
-                ? Carbon::parse($invoice->jatuh_tempo)->endOfDay()
-                : now()->addDays(7);
-
-            /** @var BrivaService $svc */
-            $svc = app(BrivaService::class);
-
-            // Kirim ke BRIVA (abaikan respon kalau nggak dipakai)
-            $svc->createVa([
-                'custCode'   => $custCode,
-                'amount'     => (int) ($invoice->jumlah ?? 0),
-                'nama'       => $nama,
-                'expiredAt'  => $expired,
-                'keterangan' => 'Pembayaran SKS ' . ($invoice->bulan ?? ''),
-            ]);
-
-            // Simpan kolom VA kalau tersedia (supaya nggak error kalau migrasi belum jalan)
-            $updates = [];
-            if (Schema::hasColumn('invoices', 'va_cust_code'))  $updates['va_cust_code']  = $custCode;
-            if (Schema::hasColumn('invoices', 'va_briva_no'))   $updates['va_briva_no']   = config('bri.briva_no');
-            if (Schema::hasColumn('invoices', 'va_full'))       $updates['va_full']       = $svc->makeFullVa($custCode);
-            if (Schema::hasColumn('invoices', 'va_expired_at')) $updates['va_expired_at'] = $expired;
-
-            if (!empty($updates)) {
-                $invoice->update($updates);
-            }
-        } catch (\Throwable $e) {
-            // Jangan ganggu user flow; cukup log biar bisa ditindaklanjuti
-            logger()->warning('[BRIVA][createVa:RPL] gagal', [
-                'invoice_id' => $invoice->id ?? null,
-                'error'      => $e->getMessage(),
-            ]);
-        }
     }
 }

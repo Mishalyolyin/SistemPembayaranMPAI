@@ -346,6 +346,10 @@ class InvoiceRegulerController extends Controller
         $hasDueDate    = Schema::hasColumn('invoices_reguler', 'jatuh_tempo');
         $hasAngsuranKe = Schema::hasColumn('invoices_reguler', 'angsuran_ke');
 
+        // === B1: custCode FIXED — ambil dari profil jika ada, fallback NIM last-N ===
+        $custCodeFixed = $mahasiswa->cust_code
+            ?? BrivaService::makeCustCode((string) ($mahasiswa->nim ?? $userId));
+
         // MODE BARU: schedule array
         if (is_array($startBulanOrSchedule)) {
             $schedule = array_values($startBulanOrSchedule);
@@ -377,11 +381,14 @@ class InvoiceRegulerController extends Controller
                     $data['angsuran_ke'] = $i + 1;
                 }
 
-                $inv = InvoiceReguler::create($data);
+                // === B1 CORE: ISI HANYA va_cust_code; JANGAN set va_full / va_briva_no ===
+                if (Schema::hasColumn('invoices_reguler', 'va_cust_code'))  $data['va_cust_code']  = $custCodeFixed;
+                if (Schema::hasColumn('invoices_reguler', 'va_full'))       $data['va_full']       = null;
+                if (Schema::hasColumn('invoices_reguler', 'va_briva_no'))   $data['va_briva_no']   = null;
+                if (Schema::hasColumn('invoices_reguler', 'va_expired_at')) $data['va_expired_at'] = null;
 
-                // === Otomatis buat VA setelah invoice dibuat ===
-                $angsKe = $hasAngsuranKe ? (int) $inv->angsuran_ke : ($i + 1);
-                $this->createVaFor($inv, $mahasiswa, $angsKe);
+                InvoiceReguler::create($data);
+                // ⚠️ Tidak ada create VA lokal di sini. VA datang via webhook va-assigned.
             }
             return;
         }
@@ -419,11 +426,14 @@ class InvoiceRegulerController extends Controller
                 $data['angsuran_ke'] = $i + 1;
             }
 
-            $inv = InvoiceReguler::create($data);
+            // === B1 CORE: ISI HANYA va_cust_code; JANGAN set va_full / va_briva_no ===
+            if (Schema::hasColumn('invoices_reguler', 'va_cust_code'))  $data['va_cust_code']  = $custCodeFixed;
+            if (Schema::hasColumn('invoices_reguler', 'va_full'))       $data['va_full']       = null;
+            if (Schema::hasColumn('invoices_reguler', 'va_briva_no'))   $data['va_briva_no']   = null;
+            if (Schema::hasColumn('invoices_reguler', 'va_expired_at')) $data['va_expired_at'] = null;
 
-            // === Otomatis buat VA setelah invoice dibuat ===
-            $angsKe = $hasAngsuranKe ? (int) $inv->angsuran_ke : ($i + 1);
-            $this->createVaFor($inv, $mahasiswa, $angsKe);
+            InvoiceReguler::create($data);
+            // ⚠️ Tidak ada create VA lokal di sini. VA datang via webhook va-assigned.
         }
     }
 
@@ -486,51 +496,5 @@ class InvoiceRegulerController extends Controller
         return view($viewCandidates[0], $data)->with('warning', 'Paket dompdf belum terpasang—silakan cetak ke PDF dari browser.');
     }
 
-    /* ====================== BRIVA HELPER ====================== */
-
-    /**
-     * Buat VA untuk satu invoice reguler (aman: try/catch & cek kolom).
-     */
-    protected function createVaFor(InvoiceReguler $invoice, $mahasiswa, int $angsuranKe): void
-    {
-        try {
-            /** @var BrivaService $briva */
-            $briva = app(BrivaService::class);
-
-            // CustCode stabil: NIM + angsuran_ke (2 digit). Fallback ke ID user kalau NIM kosong.
-            $nim = (string) ($mahasiswa->nim ?? $invoice->mahasiswa_reguler_id ?? '0000');
-            $custCode = BrivaService::makeCustCode($nim, $angsuranKe);
-
-            // Expired dari jatuh_tempo (endOfDay) atau +7 hari
-            $expired = !empty($invoice->jatuh_tempo)
-                ? Carbon::parse($invoice->jatuh_tempo)->endOfDay()
-                : now()->addDays(7);
-
-            // Hit BRIVA
-            $briva->createVa([
-                'custCode'   => $custCode,
-                'amount'     => (int) ($invoice->jumlah ?? 0),
-                'nama'       => (string) ($mahasiswa->nama ?? 'Mahasiswa'),
-                'expiredAt'  => $expired,
-                'keterangan' => 'Pembayaran SKS '.$invoice->bulan,
-            ]);
-
-            // Simpan kolom VA jika tersedia (hindari error bila migrasi belum jalan)
-            $updates = [];
-            if (Schema::hasColumn('invoices_reguler', 'va_cust_code'))  $updates['va_cust_code']  = $custCode;
-            if (Schema::hasColumn('invoices_reguler', 'va_briva_no'))   $updates['va_briva_no']   = config('bri.briva_no');
-            if (Schema::hasColumn('invoices_reguler', 'va_full'))       $updates['va_full']       = $briva->makeFullVa($custCode);
-            if (Schema::hasColumn('invoices_reguler', 'va_expired_at')) $updates['va_expired_at'] = $expired;
-
-            if (!empty($updates)) {
-                $invoice->update($updates);
-            }
-        } catch (\Throwable $e) {
-            // Jangan memblokir flow user; cukup catat log
-            logger()->warning('[BRIVA][createVa:REGULER] gagal', [
-                'invoice_id' => $invoice->id ?? null,
-                'error'      => $e->getMessage(),
-            ]);
-        }
-    }
+    // === NOTE: Tidak ada lagi createVaFor() di controller ini. VA datang via webhook.
 }

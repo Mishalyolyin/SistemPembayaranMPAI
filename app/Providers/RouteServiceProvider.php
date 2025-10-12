@@ -17,9 +17,15 @@ class RouteServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
-        // Rate limit API (aman dibiarkan)
+        // Rate limit default untuk API
         RateLimiter::for('api', function (Request $request) {
             return Limit::perMinute(60)->by($request->user()?->id ?: $request->ip());
+        });
+
+        // Rate limit khusus untuk endpoint spectate (eligibility)
+        RateLimiter::for('spectate', function (Request $request) {
+            $rpm = (int) env('SPECTATE_RPM', 120); // bisa diubah via .env
+            return Limit::perMinute($rpm)->by($request->ip());
         });
 
         // Registrasi file routes

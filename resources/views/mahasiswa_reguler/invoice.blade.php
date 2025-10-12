@@ -9,22 +9,23 @@
   // Ambil mahasiswa reguler (fallback aman)
   $mhs = ($mahasiswaReguler ?? $mahasiswa ?? auth('mahasiswa_reguler')->user() ?? auth()->user());
 
-  // Kumpulan baris invoice reguler (fleksibel)
-  $rows = ($invoices_reguler ?? $invoices ?? collect());
+  // Normalisasi rows jadi Collection biar aman dipakai (sum/count/filter)
+  $rowsRaw = ($invoices_reguler ?? $invoices ?? []);
+  $rows = $rowsRaw instanceof \Illuminate\Support\Collection ? $rowsRaw : collect($rowsRaw);
 
   // Hitung KPI (aman jika field jumlah/nominal tidak ada)
   $getNominal = function($inv){
     return (int)($inv->jumlah ?? $inv->nominal ?? 0);
   };
-  $totalTagihan = $totalTagihan ?? (is_iterable($rows) ? $rows->sum(fn($inv) => $getNominal($inv)) : 0);
-  $paidRows = is_iterable($rows)
-      ? $rows->filter(function($inv){
-          $s = strtolower((string)($inv->status ?? ''));
-          return in_array($s, ['lunas','lunas (otomatis)','terverifikasi'], true);
-        })
-      : collect();
-  $totalPaid = $totalPaid ?? $paidRows->sum(fn($inv) => $getNominal($inv));
-  $remaining = $remaining ?? max(0, $totalTagihan - $totalPaid);
+
+  // Jika controller tidak kirim total/paid/remaining, hitung dari rows
+  $totalTagihan = isset($totalTagihan) ? (int)$totalTagihan : $rows->sum(fn($inv) => $getNominal($inv));
+  $paidRows = $rows->filter(function($inv){
+    $s = strtolower((string)($inv->status ?? ''));
+    return in_array($s, ['lunas','lunas (otomatis)','terverifikasi'], true);
+  });
+  $totalPaid = isset($totalPaid) ? (int)$totalPaid : $paidRows->sum(fn($inv) => $getNominal($inv));
+  $remaining = isset($remaining) ? (int)$remaining : max(0, $totalTagihan - $totalPaid);
   $paidCount = $paidRows->count();
 
   // ===== Detect route Detail (prefer singular; fallback plural/legacy) =====
@@ -62,12 +63,17 @@
   // Helper aman ambil inisial
   $namaMhs = $mhs?->nama ?? 'Mahasiswa';
   $inisial = function_exists('mb_substr') ? mb_strtoupper(mb_substr($namaMhs,0,1)) : strtoupper(substr($namaMhs,0,1));
+
+  // Safe dashboard link
+  $dashUrl = Route::has('mahasiswa_reguler.dashboard')
+      ? route('mahasiswa_reguler.dashboard')
+      : url('/reguler/dashboard');
 @endphp
 
 @section('content')
   <div class="d-flex justify-content-between align-items-center mb-3">
     <h4 class="mb-0">Daftar Tagihan SKS</h4>
-    <a href="{{ route('mahasiswa_reguler.dashboard') }}" class="btn btn-outline-secondary">Kembali</a>
+    <a href="{{ $dashUrl }}" class="btn btn-outline-secondary">Kembali</a>
   </div>
   <small class="text-muted d-block mb-3">Semua invoice Anda ditampilkan di sini.</small>
 
@@ -123,7 +129,6 @@
     .tgl-btn .chev{transition:transform .18s ease}
     .tgl-btn[aria-expanded="true"] .chev{transform:rotate(90deg)}
 
-    /* Mobile polish */
     @media (max-width:576px){
       .invoice-table td.text-nowrap{white-space:normal!important}
       .invoice-table .btn{margin-bottom:6px}
@@ -143,14 +148,13 @@
       <div class="d-flex flex-wrap gap-2">
         <div class="kpi text-center">
           <div class="lbl">Lunas</div>
-          <div class="val text-success">{{ $paidCount }}/{{ is_iterable($rows) ? $rows->count() : 0 }}</div>
+          <div class="val text-success">{{ $paidCount }}/{{ $rows->count() }}</div>
         </div>
         <div class="kpi text-center">
           <div class="lbl">Sisa</div>
           <div class="val text-danger">Rp {{ number_format((int)$remaining,0,',','.') }}</div>
         </div>
 
-        {{-- toggle collapse (jalan meski tanpa JS bootstrap pakai fallback di bawah) --}}
         <button
           type="button"
           class="btn btn-primary tgl-btn align-self-center"
@@ -348,7 +352,7 @@
                      Detail
                   </a>
 
-                  {{-- Kwitansi (Preview) – tampil hanya jika route ada; disable bila belum lunas --}}
+                  {{-- Kwitansi (Preview) --}}
                   @if($kwPreviewUrl)
                     <a href="{{ $kwPreviewUrl }}"
                        target="_blank" rel="noopener"

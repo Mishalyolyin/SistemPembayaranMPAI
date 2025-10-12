@@ -6,6 +6,7 @@
 @php
   use App\Helpers\SemesterHelper;
   use App\Support\RplBilling;
+  use Illuminate\Support\Facades\Route;
 
   // ====== Semester aktif (handle array/string) ======
   $active   = SemesterHelper::getActiveSemester();
@@ -70,6 +71,11 @@
 
   // Sudah ada invoice?
   $sudahAda = isset($sudahAda) ? (bool)$sudahAda : ($mhs?->invoices()->exists() ?? false);
+
+  // Safe action (fallback ke URL kalau route belum didaftarkan)
+  $saveAction = Route::has('mahasiswa.angsuran.simpan')
+      ? route('mahasiswa.angsuran.simpan')
+      : url('/mahasiswa/angsuran/simpan');
 @endphp
 
 <style>
@@ -120,7 +126,7 @@
   <div class="row g-3">
     {{-- Kolom kiri: pilihan plan --}}
     <div class="col-lg-5">
-      <form id="angsuranForm" method="POST" action="{{ route('mahasiswa.angsuran.simpan') }}">
+      <form id="angsuranForm" method="POST" action="{{ $saveAction }}">
         @csrf
 
         {{-- 4x --}}

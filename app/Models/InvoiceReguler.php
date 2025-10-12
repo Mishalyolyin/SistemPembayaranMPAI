@@ -26,11 +26,13 @@ class InvoiceReguler extends Model
      * plus tambahan yang aman: jumlah -> integer, jatuh_tempo -> date.
      */
     protected $casts = [
-        'verified_at' => 'datetime',
-        'created_at'  => 'datetime',
-        'updated_at'  => 'datetime',
-        'jatuh_tempo' => 'date',
-        'jumlah'      => 'integer',
+        'verified_at'   => 'datetime',
+        'created_at'    => 'datetime',
+        'updated_at'    => 'datetime',
+        'jatuh_tempo'   => 'date',
+        'jumlah'        => 'integer',
+        // aman ditambah; kalau kolom nggak ada, Eloquent nggak error
+        'va_expired_at' => 'datetime',
     ];
 
     /* -----------------------------------------------------------------
@@ -83,7 +85,6 @@ class InvoiceReguler extends Model
      * -----------------------------------------------------------------*/
     /**
      * Accessor opsional: pakai 'nominal' jika ada, fallback ke 'jumlah'.
-     * (dipertahankan dari kode kamu)
      */
     public function getNominalFinalAttribute(): int
     {
@@ -133,7 +134,7 @@ class InvoiceReguler extends Model
 
     public function isUnpaid(): bool
     {
-        return !$this->isPaid();
+        return ! $this->isPaid();
     }
 
     /**

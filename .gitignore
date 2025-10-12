@@ -1,23 +1,51 @@
-/.phpunit.cache
-/node_modules
-/public/build
-/public/hot
-/public/storage
-/storage/*.key
-/storage/pail
-/vendor
+# --- ENV & secrets ---
 .env
-.env.backup
-.env.production
-.phpactor.json
-.phpunit.result.cache
-Homestead.json
-Homestead.yaml
-npm-debug.log
-yarn-error.log
+.env.*
+!.env.example
 /auth.json
+
+# --- Dependencies ---
+/vendor/
+/node_modules/
+
+# --- Laravel storage / cache (jangan commit logs & cache) ---
+/bootstrap/cache/*
+/storage/*.key
+/storage/logs/*
+/storage/framework/*
+/storage/pail
+/public/storage
+/public/hot
+/public/build
+/public/mix-manifest.json
+
+# --- PHPUnit / coverage ---
+/.phpunit.cache
+.phpunit.result.cache
+/coverage
+/clover.xml
+
+# --- Editors / OS junk ---
 /.fleet
 /.idea
 /.nova
 /.vscode
 /.zed
+.DS_Store
+Thumbs.db
+
+# --- Logs / caches / misc ---
+*.log
+*.cache
+.phpactor.json
+Homestead.json
+Homestead.yaml
+npm-debug.log
+yarn-error.log
+pnpm-debug.log
+
+# --- Build artifacts / archives ---
+*.zip
+
+# --- Local-only strays ---
+web Cobain.txt

@@ -10,19 +10,34 @@ class Invoice extends Model
 {
     use HasFactory;
 
-        protected $fillable = [
-        'mahasiswa_id','bulan','jumlah','status','kode',
-        'semester','tahun_akademik','jatuh_tempo','bukti','uploaded_at',
-    ];
-
     protected $table = 'invoices';
 
-    protected $guarded = [];
+    // 🔒 Whitelist kolom yang boleh di-mass assign
+    protected $fillable = [
+        'mahasiswa_id',
+        'bulan',
+        'jumlah',
+        'status',
+        'kode',
+        'semester',
+        'tahun_akademik',
+        'jatuh_tempo',
+        'bukti',
+        'uploaded_at',
+        'angsuran_ke',   // aman: controller sudah cek kolom sebelum set
+        'va_cust_code',  // ✅ hanya cust_code yang kita isi saat create
+    ];
+
+    // ❌ JANGAN pakai $guarded = [] (itu bikin semua kolom bisa diisi).
+    // Sengaja tidak memasukkan va_full, va_briva_no, va_expired_at ke $fillable.
 
     protected $casts = [
-        'verified_at' => 'datetime',
-        'created_at'  => 'datetime',
-        'updated_at'  => 'datetime',
+        'verified_at'   => 'datetime',
+        'created_at'    => 'datetime',
+        'updated_at'    => 'datetime',
+        'uploaded_at'   => 'datetime',
+        'jatuh_tempo'   => 'date',
+        'va_expired_at' => 'datetime', // kalau kolomnya ada
     ];
 
     /** Relasi balik ke mahasiswa RPL */

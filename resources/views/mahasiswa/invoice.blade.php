@@ -89,6 +89,15 @@
       .invoice-table td.text-nowrap{white-space:normal!important}
       .invoice-table .btn{margin-bottom:6px}
     }
+
+    /* Mini badge VA */
+    .badge-outline {
+      background: #fff; border:1px solid #e5e7eb; color:#374151; padding:.25rem .5rem; border-radius:999px;
+      font-size:.72rem; font-weight:600;
+    }
+    .badge-outline.success { border-color:#86efac; color:#166534; background:#ecfdf5; }
+    .badge-outline.warn    { border-color:#fde68a; color:#92400e; background:#fffbeb; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
   </style>
 
   <div class="card welcome-card my-3">
@@ -200,7 +209,7 @@
               <th style="width:60px">No</th>
               <th>Bulan</th>
               <th style="width:160px">Jumlah</th>
-              <th style="width:140px">Status</th>
+              <th style="width:180px">Status</th>
               <th style="width:120px">Bukti</th>
               <th style="width:260px">Aksi</th>
             </tr>
@@ -286,6 +295,7 @@
                 <td>{{ $inv->bulan ?? '-' }}</td>
                 <td class="text-end" style="white-space:nowrap;">Rp {{ number_format($nominal, 0, ',', '.') }}</td>
                 <td>
+                  {{-- Status pembayaran lama (dipertahankan) --}}
                   @switch($inv->status)
                     @case('Lunas') @case('Lunas (Otomatis)') @case('Terverifikasi')
                       <span class="badge bg-success">{{ $inv->status }}</span> @break
@@ -299,7 +309,21 @@
                       <span class="badge bg-warning text-dark">{{ $inv->status }}</span> @break
                     @default
                       <span class="badge bg-secondary">{{ $inv->status ?? 'Belum Upload' }}</span>
-                  @endswitch
+                  @endswitch>
+
+                  {{-- Indikator VA (Plan A): hanya info, tidak ada input --}}
+                  <div class="mt-2">
+                    @if(!empty($inv->va_full))
+                      <span class="badge-outline success">VA Assigned</span>
+                    @else
+                      <span class="badge-outline warn">Menunggu VA</span>
+                      @if(!empty($inv->va_cust_code))
+                        <div class="small text-muted mt-1">
+                          CustCode: <span class="mono">{{ $inv->va_cust_code }}</span>
+                        </div>
+                      @endif
+                    @endif
+                  </div>
                 </td>
                 <td class="text-center">
                   @if($buktiUrl)

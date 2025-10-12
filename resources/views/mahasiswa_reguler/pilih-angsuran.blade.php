@@ -1,3 +1,4 @@
+{{-- resources/views/mahasiswa_reguler/angsuran.blade.php --}}
 @extends('layouts.mahasiswa_reguler')
 @section('title', 'Pilih Angsuran (Reguler)')
 
@@ -60,7 +61,7 @@
           'Desember '.$y,'Januari '.($y+1),'Februari '.($y+1),'Maret '.($y+1),'April '.($y+1),'Mei '.($y+1),'Juni '.($y+1),'Juli '.($y+1),'Agustus '.($y+1),'September '.($y+1)
         ];
       }
-      // biar konsisten struktur {ym,label} (ym akan diisi client-side)
+      // biar konsisten struktur {ym,label}
       return array_map(fn($L) => ['ym'=>null, 'label'=>$L], $labels);
   };
 
@@ -85,7 +86,7 @@
   .plan{transition:transform .18s,box-shadow .18s,border-color .18s;border:1.5px solid rgba(0,0,0,.08);border-radius:14px;cursor:pointer;}
   .plan:hover{transform:translateY(-2px);box-shadow:0 12px 28px rgba(0,0,0,.10);border-color:rgba(25,135,84,.35);}
   .plan.selected{border-color:#198754;box-shadow:0 14px 32px rgba(25,135,84,.22);}
-  .plan .badge-round{width:28px;height:28px;border-radius:9999px;display:inline-flex;align-items:center;justify-content:center;background:rgba(25,135,84,.12);font-weight:700;}
+  .plan .badge-round{width:28px;height:28px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;background:rgba(25,135,84,.12);font-weight:700;}
   .month-pill{display:inline-block;padding:.35rem .6rem;border-radius:999px;border:1px dashed rgba(0,0,0,.12);font-size:.9rem;transition:.15s;}
   .month-pill:hover{background:rgba(25,135,84,.06);border-color:#198754;}
   .cta-sticky{position:sticky;top:12px;z-index:10;}
@@ -131,7 +132,7 @@
       <form id="angsuranForm" method="POST" action="{{ route($submitRoute) }}">
         @csrf
 
-        {{-- Hidden bulan_mulai -> akan diisi JS dalam format YYYY-MM (wajib agar lolos validator server) --}}
+        {{-- Hidden bulan_mulai -> diisi JS dengan NAMA BULAN (bukan YYYY-MM) agar kompat ke fallback controller --}}
         <input type="hidden" name="bulan_mulai" id="bulanMulaiInput" value="">
 
         @foreach($opsiAngsuran as $opt)
@@ -217,31 +218,17 @@
     return index === lastIndex ? base + sisa : base;
   }
 
-  // Map bulan ID -> 2 digit
-  const MONTH_MAP = {
-    'januari':'01','februari':'02','maret':'03','april':'04','mei':'05','juni':'06',
-    'juli':'07','agustus':'08','september':'09','oktober':'10','november':'11','desember':'12'
-  };
-
-  // Convert "September 2024" -> "2024-09"
-  function labelToYm(label){
-    if(!label) return null;
-    const parts = String(label).trim().split(/\s+/);
-    if(parts.length < 2) return null;
-    const month = (parts[0]||'').toLowerCase();
-    const year  = (parts[1]||'').replace(/\D+/g,'');
-    const mm = MONTH_MAP[month];
-    if(!mm || !year) return null;
-    return `${year}-${mm}`;
+  // Ambil NAMA BULAN dari label "September 2024" -> "September"
+  function firstMonthNameFromLabel(label){
+    if(!label) return '';
+    const m = String(label).trim().match(/^([A-Za-zÀ-ÿ]+)\b/);
+    return m ? m[1] : '';
   }
 
-  // Ambil YM pertama dari PREVIEWS plan saat ini
-  function getFirstYm(planKey){
+  // Ambil label pertama dari PREVIEWS plan saat ini
+  function getFirstLabel(planKey){
     const rows = PREVIEWS[planKey] || [];
-    if(rows.length === 0) return null;
-    // jika helper sudah menyediakan 'ym', pakai itu, kalau tidak parse dari label
-    const ym = rows[0]?.ym || labelToYm(rows[0]?.label);
-    return ym || null;
+    return rows.length ? (rows[0]?.label || '') : '';
   }
 
   function renderPreview(planKey){
@@ -263,9 +250,10 @@
     pvTag.textContent = planKey ? (planKey + 'x') : '—';
     pvTotal.textContent = rupiah(TOTAL);
 
-    // isi hidden bulan_mulai (YYYY-MM) berdasarkan item pertama
-    const ym = getFirstYm(planKey);
-    if (ym) bulanMulaiInput.value = ym;
+    // isi hidden bulan_mulai dengan NAMA BULAN (kompat ke fallback controller generateInvoices(string))
+    const firstLabel = getFirstLabel(planKey);
+    const monthName  = firstMonthNameFromLabel(firstLabel);
+    bulanMulaiInput.value = monthName || '';
   }
 
   function syncSelectedUI(){
@@ -284,7 +272,7 @@
     }
   }
 
-  // Pastikan sebelum submit, bulan_mulai sudah terisi YYYY-MM
+  // Pastikan sebelum submit, bulan_mulai terisi (nama bulan)
   document.getElementById('angsuranForm').addEventListener('submit', function(e){
     const current = document.querySelector('input[name="angsuran"]:checked');
     if(!current){
@@ -292,10 +280,9 @@
       return;
     }
     if(!bulanMulaiInput.value){
-      const ym = getFirstYm(current.value);
-      if(ym){ bulanMulaiInput.value = ym; }
+      const monthName = firstMonthNameFromLabel(getFirstLabel(current.value));
+      if(monthName){ bulanMulaiInput.value = monthName; }
     }
-    // Hard guard: jika masih kosong, block submit biar gak 422 "format invalid"
     if(!bulanMulaiInput.value){
       e.preventDefault();
       alert('Bulan mulai tidak valid. Silakan refresh halaman dan coba lagi.');

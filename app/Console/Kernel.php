@@ -13,6 +13,7 @@ class Kernel extends ConsoleKernel
     protected $commands = [
         \App\Console\Commands\ImportMahasiswaCSV::class,
         \App\Console\Commands\ImportMahasiswaRegulerCSV::class, // ✅ tambahkan command baru di sini
+        \App\Console\Commands\BrivaBackfillCust::class,
     ];
 
     protected function schedule(Schedule $schedule): void
@@ -22,6 +23,7 @@ class Kernel extends ConsoleKernel
 
     protected function commands(): void
     {
+        
         $this->load(__DIR__.'/Commands');
 
         require base_path('routes/console.php');

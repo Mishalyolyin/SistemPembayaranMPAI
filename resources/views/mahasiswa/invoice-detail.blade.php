@@ -70,7 +70,7 @@
     }
     $uploadAction = $uploadAction ?: url('/mahasiswa/invoices/'.$iid.'/upload');
 
-    // Route reset (POST) – hanya URL; methodnya kita paksa POST via <button formaction=...>
+    // Route reset (POST)
     $resetAction = null;
     foreach (['mahasiswa.invoices.reset','mahasiswa.invoice.reset'] as $r) {
       if (Route::has($r) && $iid) {
@@ -128,7 +128,6 @@
           <div class="p-3 border rounded-3">
             <div class="mb-2"><strong>Nama:</strong> {{ $mahasiswa->nama }}</div>
             <div class="mb-2"><strong>NIM:</strong> {{ $mahasiswa->nim }}</div>
-            
             <div class="mb-0"><strong>No. HP:</strong> {{ $mahasiswa->no_hp ?? '—' }}</div>
           </div>
         </div>
@@ -138,6 +137,56 @@
         <div class="alert alert-danger mt-3 mb-0">
           <strong>Catatan Admin:</strong> {{ $catatan }}
         </div>
+      @endif
+    </div>
+  </div>
+
+  {{-- ===== Informasi Virtual Account (Plan A) ===== --}}
+  <style>
+    .va-card{border:1px solid #e5e7eb;border-radius:12px}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace}
+    .badge-outline{background:#fff;border:1px solid #e5e7eb;color:#374151;padding:.25rem .5rem;border-radius:999px;font-size:.75rem;font-weight:600}
+    .badge-outline.success{border-color:#86efac;color:#166534;background:#ecfdf5}
+    .badge-outline.warn{border-color:#fde68a;color:#92400e;background:#fffbeb}
+  </style>
+
+  <div class="card va-card shadow-sm mb-4">
+    <div class="card-header bg-white">
+      <strong>Informasi Virtual Account (VA) BRI</strong>
+    </div>
+    <div class="card-body">
+      @if(!empty($invoice->va_full))
+        <div class="mb-1 text-muted">VA BRI</div>
+        <div class="mono fs-5 fw-semibold">{{ $invoice->va_full }}</div>
+        @if(!empty($invoice->va_expired_at))
+          <div class="small text-muted mt-1">
+            Berlaku s/d:
+            {{ \Illuminate\Support\Carbon::parse($invoice->va_expired_at)->timezone(config('app.timezone'))->translatedFormat('d M Y H:i') }} WIB
+          </div>
+        @endif
+
+        <div class="mt-3">
+          <span class="badge-outline success">VA Assigned</span>
+        </div>
+
+        <details class="mt-3">
+          <summary class="fw-semibold">Cara bayar via BRIVA</summary>
+          <ol class="mt-2 mb-0">
+            <li>Buka channel BRI (BRImo/ATM/merchant).</li>
+            <li>Pilih menu BRIVA lalu masukkan VA di atas.</li>
+            <li>Periksa nama & nominal, lalu konfirmasi pembayaran.</li>
+          </ol>
+        </details>
+      @else
+        <div class="mb-2">
+          <span class="badge-outline warn">Menunggu VA</span>
+        </div>
+        <div class="text-muted">VA final akan tampil otomatis setelah ditetapkan bank (webhook “VA Assigned”).</div>
+        @if(!empty($invoice->va_cust_code))
+          <div class="small text-muted mt-2">
+            CustCode (referensi): <span class="mono">{{ $invoice->va_cust_code }}</span>
+          </div>
+        @endif
       @endif
     </div>
   </div>
