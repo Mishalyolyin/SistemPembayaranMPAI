@@ -26,7 +26,8 @@ return new class extends Migration
             $table->unsignedSmallInteger('angsuran_ke')->nullable()->index();
 
             // Nominal & status (enum dibiarkan persis seperti semula)
-            $table->integer('jumlah');
+            $table->unsignedBigInteger('amount');
+
             $table->enum('status', ['Belum', 'Menunggu Verifikasi', 'Lunas', 'Lunas (Otomatis)', 'Ditolak'])
                   ->default('Belum');
 
@@ -49,19 +50,11 @@ return new class extends Migration
     /**
      * Reverse the migrations.
      */
-    public function down(): void
-    {
-        // Drop unik dulu (aman walau tabel langsung di-drop)
-        if (Schema::hasTable('invoices')) {
-            Schema::table('invoices', function (Blueprint $table) {
-                try {
-                    $table->dropUnique('uniq_rpl_mhs_angsuran');
-                } catch (\Throwable $e) {
-                    // abaikan jika belum pernah dibuat
-                }
-            });
-        }
+public function down(): void
+{
+    Schema::disableForeignKeyConstraints();
+    Schema::dropIfExists('invoices');
+    Schema::enableForeignKeyConstraints();
+}
 
-        Schema::dropIfExists('invoices');
-    }
 };

@@ -24,20 +24,20 @@ return [
         ],
 
         'admin' => [
-            'driver'   => 'session',
+            'driver'   => 'session',    
             'provider' => 'admins',
         ],
 
         // RPL
         'mahasiswa' => [
             'driver'   => 'session',
-            'provider' => 'mahasiswa',        // <- singular
+            'provider' => 'mahasiswa',
         ],
 
         // Reguler
         'mahasiswa_reguler' => [
             'driver'   => 'session',
-            'provider' => 'mahasiswa_reguler', // <- singular
+            'provider' => 'mahasiswa_reguler',
         ],
 
         // (opsional) API token legacy
@@ -52,6 +52,7 @@ return [
     |--------------------------------------------------------------------------
     | User Providers
     |--------------------------------------------------------------------------
+    | Provider name harus konsisten dengan yang dipakai guards & brokers.
     */
     'providers' => [
         'users' => [
@@ -98,7 +99,7 @@ return [
             'throttle' => 60,
         ],
 
-        // Broker untuk RPL
+        // Broker untuk RPL (dipakai Forgot/ResetPasswordMahasiswaController)
         'mahasiswa' => [
             'provider' => 'mahasiswa',
             'table'    => env('AUTH_PASSWORD_RESET_TOKEN_TABLE', 'password_reset_tokens'),
@@ -106,8 +107,16 @@ return [
             'throttle' => 60,
         ],
 
-        // Broker untuk Reguler
+        // Broker untuk Reguler (pakai nama lengkap)
         'mahasiswa_reguler' => [
+            'provider' => 'mahasiswa_reguler',
+            'table'    => env('AUTH_PASSWORD_RESET_TOKEN_TABLE', 'password_reset_tokens'),
+            'expire'   => 60,
+            'throttle' => 60,
+        ],
+
+        // (opsional) Alias "reguler" kalau ada controller lama pakai broker('reguler')
+        'reguler' => [
             'provider' => 'mahasiswa_reguler',
             'table'    => env('AUTH_PASSWORD_RESET_TOKEN_TABLE', 'password_reset_tokens'),
             'expire'   => 60,

@@ -33,13 +33,10 @@ use App\Http\Controllers\Admin\InvoiceRegulerController    as AdminInvoiceRegule
 use App\Http\Controllers\Admin\MahasiswaController         as AdminMahasiswaController;
 use App\Http\Controllers\Admin\MahasiswaRegulerController  as AdminMahasiswaRegulerController;
 use App\Http\Controllers\Admin\KalenderEventController     as AdminKalenderEventController;
-/** Settings Controllers (baru) */
 use App\Http\Controllers\Admin\SettingController;
 use App\Http\Controllers\Admin\RegulerSettingController;
-/** Kelulusan & Perpanjangan (baru) */
 use App\Http\Controllers\Admin\KelulusanController;
 use App\Http\Controllers\Admin\PerpanjanganController;
-/** ===== Export Invoices (baru) ===== */
 use App\Http\Controllers\Admin\ExportInvoiceController;
 
 /*
@@ -157,30 +154,24 @@ Route::prefix('mahasiswa')->name('mahasiswa.')->middleware('auth:mahasiswa')->gr
     Route::get ('/profil', [RplProfilController::class, 'edit'])->name('profil.edit');
     Route::post('/profil', [RplProfilController::class, 'update'])->name('profil.update');
 
-    // Skema angsuran (form + submit)
     Route::get ('/angsuran', [RplAngsuranController::class, 'create'])->name('angsuran.create');
     Route::post('/angsuran', [RplAngsuranController::class, 'store'])->name('angsuran.store');
 
-    // Invoices
     Route::get ('/invoices',                  [RplInvoiceController::class, 'index'])->name('invoices.index');
     Route::get ('/invoices/{invoice}',        [RplInvoiceController::class, 'show'])->whereNumber('invoice')->name('invoices.show');
     Route::post('/invoices/{invoice}/upload', [RplInvoiceController::class, 'upload'])->whereNumber('invoice')->name('invoices.upload');
     Route::post('/invoices/{invoice}/reset',  [RplInvoiceController::class, 'reset'])->whereNumber('invoice')->name('invoices.reset');
 
-    /* ===== Kwitansi RPL (per tagihan) — pakai method GET kwitansi() ===== */
-    Route::get ('/invoices/{invoice}/kwitansi',
-        [RplInvoiceController::class, 'kwitansi']
-    )->whereNumber('invoice')->name('invoices.kwitansi');
+    Route::get ('/invoices/{invoice}/kwitansi', [RplInvoiceController::class, 'kwitansi'])
+        ->whereNumber('invoice')->name('invoices.kwitansi');
 
-    /* ===== Kwitansi RPL (semua lunas) — pakai method kwitansiBulk() ===== */
-    Route::get('/invoices/kwitansi/bulk',
-        [RplInvoiceController::class, 'kwitansiBulk']
-    )->name('invoices.kwitansi.bulk');
+    Route::get('/invoices/kwitansi/bulk', [RplInvoiceController::class, 'kwitansiBulk'])
+        ->name('invoices.kwitansi.bulk');
 });
 
 /*
 |--------------------------------------------------------------------------
-| Mahasiswa RPL – ALIAS nama lama (kompatibilitas Blade lama)
+| Mahasiswa RPL – ALIAS (kompat Blade lama)
 |--------------------------------------------------------------------------
 */
 Route::prefix('mahasiswa')->name('mahasiswa.')->middleware('auth:mahasiswa')->group(function () {
@@ -191,7 +182,6 @@ Route::prefix('mahasiswa')->name('mahasiswa.')->middleware('auth:mahasiswa')->gr
     Route::get ('/angsuran/form',  [RplAngsuranController::class, 'create'])->name('angsuran.form');
     Route::post('/angsuran/simpan',[RplAngsuranController::class, 'store'])->name('angsuran.simpan');
 
-    // alias lama untuk bulk kwitansi → arahkan ke nama route baru
     Route::get('/invoice/kwitansi/bulk', fn () => redirect()->route('mahasiswa.invoices.kwitansi.bulk'))
         ->name('invoice.kwitansi.bulk');
 });
@@ -212,21 +202,24 @@ Route::prefix('reguler')->name('reguler.')->middleware('auth:mahasiswa_reguler')
     Route::post('/angsuran/simpan', [AngsuranRegulerController::class, 'store'])->name('angsuran.simpan');
 
     Route::get('/invoice/setup', [RegInvoiceStudentController::class, 'setupAngsuran'])->name('invoice.setup');
-    Route::get('/invoice', fn () => redirect()->route('reguler.invoices.index'))->name('invoice.index');
 
-    Route::get ('/invoices',                  [RegInvoiceStudentController::class, 'index'])->name('invoices.index');
+    /** Index (standarisasi reguler.invoice.index) */
+    Route::get('/invoices', [RegInvoiceStudentController::class, 'index'])->name('invoice.index');
+    Route::get('/invoices/index', fn () => redirect()->route('reguler.invoice.index'))->name('invoices.index');
+    Route::get('/invoice',       fn () => redirect()->route('reguler.invoice.index'))->name('invoice.index.alias');
+
+    /** Detail & aksi */
     Route::get ('/invoices/{invoice}',        [RegInvoiceStudentController::class, 'detail'])->whereNumber('invoice')->name('invoices.show');
     Route::post('/invoices/{invoice}/upload', [RegInvoiceStudentController::class, 'upload'])->whereNumber('invoice')->name('invoices.upload');
     Route::post('/invoices/{invoice}/reset',  [RegInvoiceStudentController::class, 'reset'])->whereNumber('invoice')->name('invoices.reset');
 
+    /** Kwitansi */
     Route::get ('/invoices/{invoice}/kwitansi',          [RegInvoiceStudentController::class, 'kwitansiForm'])->whereNumber('invoice')->name('invoice.kwitansi.form');
     Route::post('/invoices/{invoice}/kwitansi',          [RegInvoiceStudentController::class, 'kwitansiDownload'])->whereNumber('invoice')->name('invoice.kwitansi.download');
     Route::get ('/invoices/{invoice}/kwitansi/download', [RegInvoiceStudentController::class, 'kwitansiDownload'])->whereNumber('invoice')->name('invoice.kwitansi.direct');
 
-    // FIX: bulk reguler -> panggil method kwitansiBulk (bukan index)
     Route::get('/invoices/kwitansi/bulk', [RegInvoiceStudentController::class, 'kwitansiBulk'])->name('invoices.kwitansi.bulk');
 
-    // FIX: Tutorial Reguler (untuk tombol "Lihat Tutorial")
     Route::view('/tutorial', 'mahasiswa_reguler.tutorial')->name('tutorial');
 });
 
@@ -243,7 +236,7 @@ Route::prefix('mahasiswa_reguler')->name('mahasiswa_reguler.')->middleware('auth
     Route::get ('/angsuran', [AngsuranRegulerController::class, 'create'])->name('angsuran.form');
     Route::post('/angsuran', [AngsuranRegulerController::class, 'store'])->name('angsuran.simpan');
 
-    Route::get ('/invoice',       fn () => redirect()->route('reguler.invoices.index'))->name('invoice.index');
+    Route::get ('/invoice', fn () => redirect()->route('reguler.invoice.index'))->name('invoice.index');
     Route::get ('/invoice/setup', [RegInvoiceStudentController::class, 'setupAngsuran'])->name('invoice.setup');
 
     Route::get ('/invoices/{invoice}',        [RegInvoiceStudentController::class, 'detail'])->whereNumber('invoice')->name('invoices.show');
@@ -258,7 +251,6 @@ Route::prefix('mahasiswa_reguler')->name('mahasiswa_reguler.')->middleware('auth
 
     Route::get('/invoice/kwitansi/bulk', fn () => redirect()->route('reguler.invoices.kwitansi.bulk'))->name('invoice.kwitansi.bulk');
 
-    // FIX: alias tutorial supaya link lama/alternatif bisa pakai prefix mahasiswa_reguler
     Route::get('/tutorial', fn () => redirect()->route('reguler.tutorial'))->name('tutorial');
 });
 
@@ -385,6 +377,13 @@ Route::prefix('admin')->name('admin.')->group(function () {
         Route::get('/exports/invoices/reguler', [ExportInvoiceController::class, 'exportReguler'])->name('exports.invoices.reguler');
     });
 });
+
+/*
+|--------------------------------------------------------------------------
+| Web healthcheck
+|--------------------------------------------------------------------------
+*/
+Route::get('/healthz', fn () => response()->json(['ok' => true]))->name('healthz');
 
 /* Fallback */
 Route::fallback(fn () => abort(404));

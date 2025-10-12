@@ -14,6 +14,7 @@ use Illuminate\Database\QueryException;
 use App\Models\Invoice;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Str;
+use App\Services\BrivaService;
 use Carbon\Carbon;
 
 class InvoiceController extends Controller
@@ -510,6 +511,7 @@ class InvoiceController extends Controller
 
     /**
      * Generator invoice yang aman & idempotent untuk 1 mahasiswa.
+     * (DITAMBAHKAN: panggil BRIVA setelah create)
      */
     private function generateInvoicesFor(
         int $mahasiswaId,
@@ -568,7 +570,11 @@ class InvoiceController extends Controller
 
                 try {
                     // idempotent-safe dengan unique composite di DB
-                    Invoice::create($payload);
+                    $inv = Invoice::create($payload);
+
+                    // === Tambahan: bikin VA setelah invoice berhasil dibuat ===
+                    $angsKe = $hasAngsKe ? (int) $inv->angsuran_ke : ($i + 1);
+                    $this->createVaFor($inv, $angsKe);
                 } catch (QueryException $e) {
                     // Kalau kebentur unik (race/double submit), lanjut aja
                     if (!str_contains($e->getMessage(), 'uniq_rpl_mhs_angsuran')) {
@@ -596,5 +602,62 @@ class InvoiceController extends Controller
             }
         }
         return redirect('/mahasiswa/invoices');
+    }
+
+    /* ==================== BRIVA HELPERS ==================== */
+
+    /**
+     * Buat VA untuk satu invoice RPL (aman: try/catch, cek kolom sebelum update).
+     */
+    private function createVaFor(Invoice $invoice, int $angsuranKe): void
+    {
+        try {
+            // Ambil mahasiswa aktif dari guard; fallback aman kalau beda konteks
+            $mahasiswa = Auth::guard('mahasiswa')->user();
+
+            // Kalau guard kosong atau bukan pemilik invoice, minimal isi nama NIM dari kolom relasi kalau ada
+            $nim  = (string) ($mahasiswa->nim ?? '');
+            $nama = (string) ($mahasiswa->nama ?? 'Mahasiswa');
+
+            // CustCode stabil: NIM + angsuran_ke (2 digit). Jika NIM kosong, pakai ID invoice sebagai fallback.
+            if ($nim === '') {
+                $nim = (string) ($invoice->mahasiswa_id ?? '0000');
+            }
+            $custCode = BrivaService::makeCustCode($nim, $angsuranKe);
+
+            // Expired pakai jatuh_tempo (endOfDay) kalau ada; fallback +7 hari
+            $expired = !empty($invoice->jatuh_tempo)
+                ? Carbon::parse($invoice->jatuh_tempo)->endOfDay()
+                : now()->addDays(7);
+
+            /** @var BrivaService $svc */
+            $svc = app(BrivaService::class);
+
+            // Kirim ke BRIVA (abaikan respon kalau nggak dipakai)
+            $svc->createVa([
+                'custCode'   => $custCode,
+                'amount'     => (int) ($invoice->jumlah ?? 0),
+                'nama'       => $nama,
+                'expiredAt'  => $expired,
+                'keterangan' => 'Pembayaran SKS ' . ($invoice->bulan ?? ''),
+            ]);
+
+            // Simpan kolom VA kalau tersedia (supaya nggak error kalau migrasi belum jalan)
+            $updates = [];
+            if (Schema::hasColumn('invoices', 'va_cust_code'))  $updates['va_cust_code']  = $custCode;
+            if (Schema::hasColumn('invoices', 'va_briva_no'))   $updates['va_briva_no']   = config('bri.briva_no');
+            if (Schema::hasColumn('invoices', 'va_full'))       $updates['va_full']       = $svc->makeFullVa($custCode);
+            if (Schema::hasColumn('invoices', 'va_expired_at')) $updates['va_expired_at'] = $expired;
+
+            if (!empty($updates)) {
+                $invoice->update($updates);
+            }
+        } catch (\Throwable $e) {
+            // Jangan ganggu user flow; cukup log biar bisa ditindaklanjuti
+            logger()->warning('[BRIVA][createVa:RPL] gagal', [
+                'invoice_id' => $invoice->id ?? null,
+                'error'      => $e->getMessage(),
+            ]);
+        }
     }
 }

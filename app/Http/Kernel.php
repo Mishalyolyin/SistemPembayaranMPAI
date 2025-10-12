@@ -15,10 +15,11 @@ class Kernel extends HttpKernel
         \Illuminate\Foundation\Http\Middleware\ValidatePostSize::class,
         \Illuminate\Foundation\Http\Middleware\PreventRequestsDuringMaintenance::class,
         \Illuminate\Http\Middleware\TrustProxies::class,
+        // (opsional) \Illuminate\Http\Middleware\TrustHosts::class,
     ];
 
     /**
-     * Middleware group web dan api.
+     * Middleware groups untuk web & api.
      */
     protected $middlewareGroups = [
         'web' => [
@@ -31,6 +32,7 @@ class Kernel extends HttpKernel
         ],
 
         'api' => [
+            // Jika pakai Sanctum, biarkan ini:
             \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class,
             \Illuminate\Routing\Middleware\ThrottleRequests::class.':api',
             \Illuminate\Routing\Middleware\SubstituteBindings::class,
@@ -38,11 +40,24 @@ class Kernel extends HttpKernel
     ];
 
     /**
-     * Middleware route (dipanggil pakai alias 'auth', dll).
+     * Middleware route (dipanggil via alias).
      */
     protected $routeMiddleware = [
-        'auth' => \App\Http\Middleware\Authenticate::class,
-        'guest' => \App\Http\Middleware\RedirectIfAuthenticated::class,
-        'verified' => \Illuminate\Auth\Middleware\EnsureEmailIsVerified::class,
+        // Auth & akses
+        'auth'             => \App\Http\Middleware\Authenticate::class,
+        'guest'            => \App\Http\Middleware\RedirectIfAuthenticated::class,
+        'verified'         => \Illuminate\Auth\Middleware\EnsureEmailIsVerified::class,
+        'can'              => \Illuminate\Auth\Middleware\Authorize::class,
+        'auth.basic'       => \Illuminate\Auth\Middleware\AuthenticateWithBasicAuth::class,
+        'auth.session'     => \Illuminate\Session\Middleware\AuthenticateSession::class,
+
+        // Tanda tangan/limiting/cache (umum Laravel)
+        'signed'           => \Illuminate\Routing\Middleware\ValidateSignature::class,
+        'throttle'         => \Illuminate\Routing\Middleware\ThrottleRequests::class,
+        'cache.headers'    => \Illuminate\Http\Middleware\SetCacheHeaders::class,
+
+        // === Webhook BRI (HMAC/Bearer) ===
+        // Pastikan kamu sudah buat class: App\Http\Middleware\VerifyBrivaWebhook
+        'briva.webhook'    => \App\Http\Middleware\VerifyBrivaWebhook::class,
     ];
 }

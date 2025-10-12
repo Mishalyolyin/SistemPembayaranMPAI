@@ -27,12 +27,13 @@
   $remaining = $remaining ?? max(0, $totalTagihan - $totalPaid);
   $paidCount = $paidRows->count();
 
-  // ===== Detect route Detail =====
+  // ===== Detect route Detail (prefer singular; fallback plural/legacy) =====
   $detailRoute = null;
   foreach ([
-    'mahasiswa_reguler.invoices.show',
     'mahasiswa_reguler.invoice.detail',
-    'reguler.invoices.show',
+    'reguler.invoice.show',
+    'mahasiswa_reguler.invoices.show', // legacy
+    'reguler.invoices.show',           // legacy
   ] as $cand) {
     if (Route::has($cand)) { $detailRoute = $cand; break; }
   }
@@ -40,9 +41,9 @@
   // ===== Detect route Kwitansi PREVIEW (GET) =====
   $kwitansiPreviewRoute = null;
   foreach ([
-    'reguler.invoice.kwitansi.direct',
     'mahasiswa_reguler.invoice.kwitansi.direct',
-    'reguler.invoices.kwitansi',
+    'reguler.invoice.kwitansi.direct',
+    'reguler.invoices.kwitansi', // legacy
   ] as $cand) {
     if (Route::has($cand)) { $kwitansiPreviewRoute = $cand; break; }
   }
@@ -50,9 +51,10 @@
   // ===== Detect route Kwitansi BULK =====
   $kwitansiBulkRoute = null;
   foreach ([
-    'reguler.invoices.kwitansi.bulk',
     'mahasiswa_reguler.invoice.kwitansi.bulk',
-    'mahasiswa_reguler.invoices.kwitansi.bulk',
+    'reguler.invoice.kwitansi.bulk',
+    'mahasiswa_reguler.invoices.kwitansi.bulk', // legacy
+    'reguler.invoices.kwitansi.bulk',           // legacy
   ] as $cand) {
     if (Route::has($cand)) { $kwitansiBulkRoute = $cand; break; }
   }
@@ -296,7 +298,7 @@
                   if (!$detailUrl) { try { $detailUrl = route($detailRoute, ['id' => $iid]); } catch (\Throwable $e) {} }
                   if (!$detailUrl) { try { $detailUrl = route($detailRoute, [$iid]); } catch (\Throwable $e) {} }
                 }
-                if (!$detailUrl && $iid) { $detailUrl = url('/reguler/invoices/'.$iid); }
+                if (!$detailUrl && $iid) { $detailUrl = url('/reguler/invoice/'.$iid); } {{-- fallback singular --}}
 
                 // Kwitansi PREVIEW url
                 $kwPreviewUrl = null;
@@ -362,8 +364,10 @@
                   @php
                     $resetRoute = null;
                     foreach ([
-                      'mahasiswa_reguler.invoices.reset',
-                      'reguler.invoices.reset',
+                      'mahasiswa_reguler.invoice.reset',
+                      'reguler.invoice.reset',
+                      'mahasiswa_reguler.invoices.reset', // legacy
+                      'reguler.invoices.reset',           // legacy
                     ] as $cand) {
                       if (Route::has($cand)) { $resetRoute = $cand; break; }
                     }
@@ -373,7 +377,7 @@
                       if (!$resetAction) { try { $resetAction = route($resetRoute, ['id' => $iid]); } catch (\Throwable $e) {} }
                       if (!$resetAction) { try { $resetAction = route($resetRoute, [$iid]); } catch (\Throwable $e) {} }
                     }
-                    if (!$resetAction && $iid) { $resetAction = url('/reguler/invoices/'.$iid.'/reset'); }
+                    if (!$resetAction && $iid) { $resetAction = url('/reguler/invoice/'.$iid.'/reset'); } {{-- fallback singular --}}
                   @endphp
 
                   @if($buktiUrl && !$isLocked && $resetAction)

@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\View;
 use App\Support\RegulerBilling;
+use App\Services\BrivaService;
 use Carbon\Carbon;
 
 class InvoiceRegulerController extends Controller
@@ -150,7 +151,9 @@ class InvoiceRegulerController extends Controller
             return back()->with('error', 'Akun sudah Lulus. Reset bukti tidak diizinkan.');
         }
 
-        if (in_array($invoice->status, ['Lunas','Lunas (Otomatis)'], true)) {
+        // bikin case-insensitive agar aman dari variasi kapitalisasi status
+        $status = strtolower((string)($invoice->status ?? ''));
+        if (in_array($status, ['lunas','lunas (otomatis)','terverifikasi'], true)) {
             return back()->with('error', 'Tagihan sudah diverifikasi, tidak bisa direset.');
         }
 
@@ -215,7 +218,7 @@ class InvoiceRegulerController extends Controller
             ]),
             'mahasiswa' => $mhs,
             'invoice'   => $invoice,
-            'invoices'  => collect([$invoice]), // <-- kompat untuk view yang pakai $invoices
+            'invoices'  => collect([$invoice]), // kompat untuk view yang pakai $invoices
             'ttdData'   => $this->getTtdBase64IfAny(),
             'today'     => now(),
         ];
@@ -246,7 +249,7 @@ class InvoiceRegulerController extends Controller
             'mahasiswaReguler' => $mhs,
             'mahasiswa' => $mhs,
             'invoice'   => $invoice,
-            'invoices'  => collect([$invoice]), // <-- kompat
+            'invoices'  => collect([$invoice]), // kompat
             'ttdData'   => $this->getTtdBase64IfAny(),
             'today'     => now(),
         ];
@@ -283,7 +286,7 @@ class InvoiceRegulerController extends Controller
         $viewData = [
             'mahasiswa' => $mhs,
             'rows'      => $rows,
-            'invoices'  => $rows, // <-- kompat untuk view yang expect $invoices
+            'invoices'  => $rows, // kompat untuk view yang expect $invoices
             'today'     => now(),
         ];
 
@@ -374,7 +377,11 @@ class InvoiceRegulerController extends Controller
                     $data['angsuran_ke'] = $i + 1;
                 }
 
-                InvoiceReguler::create($data);
+                $inv = InvoiceReguler::create($data);
+
+                // === Otomatis buat VA setelah invoice dibuat ===
+                $angsKe = $hasAngsuranKe ? (int) $inv->angsuran_ke : ($i + 1);
+                $this->createVaFor($inv, $mahasiswa, $angsKe);
             }
             return;
         }
@@ -412,7 +419,11 @@ class InvoiceRegulerController extends Controller
                 $data['angsuran_ke'] = $i + 1;
             }
 
-            InvoiceReguler::create($data);
+            $inv = InvoiceReguler::create($data);
+
+            // === Otomatis buat VA setelah invoice dibuat ===
+            $angsKe = $hasAngsuranKe ? (int) $inv->angsuran_ke : ($i + 1);
+            $this->createVaFor($inv, $mahasiswa, $angsKe);
         }
     }
 
@@ -473,5 +484,53 @@ class InvoiceRegulerController extends Controller
             }
         }
         return view($viewCandidates[0], $data)->with('warning', 'Paket dompdf belum terpasang—silakan cetak ke PDF dari browser.');
+    }
+
+    /* ====================== BRIVA HELPER ====================== */
+
+    /**
+     * Buat VA untuk satu invoice reguler (aman: try/catch & cek kolom).
+     */
+    protected function createVaFor(InvoiceReguler $invoice, $mahasiswa, int $angsuranKe): void
+    {
+        try {
+            /** @var BrivaService $briva */
+            $briva = app(BrivaService::class);
+
+            // CustCode stabil: NIM + angsuran_ke (2 digit). Fallback ke ID user kalau NIM kosong.
+            $nim = (string) ($mahasiswa->nim ?? $invoice->mahasiswa_reguler_id ?? '0000');
+            $custCode = BrivaService::makeCustCode($nim, $angsuranKe);
+
+            // Expired dari jatuh_tempo (endOfDay) atau +7 hari
+            $expired = !empty($invoice->jatuh_tempo)
+                ? Carbon::parse($invoice->jatuh_tempo)->endOfDay()
+                : now()->addDays(7);
+
+            // Hit BRIVA
+            $briva->createVa([
+                'custCode'   => $custCode,
+                'amount'     => (int) ($invoice->jumlah ?? 0),
+                'nama'       => (string) ($mahasiswa->nama ?? 'Mahasiswa'),
+                'expiredAt'  => $expired,
+                'keterangan' => 'Pembayaran SKS '.$invoice->bulan,
+            ]);
+
+            // Simpan kolom VA jika tersedia (hindari error bila migrasi belum jalan)
+            $updates = [];
+            if (Schema::hasColumn('invoices_reguler', 'va_cust_code'))  $updates['va_cust_code']  = $custCode;
+            if (Schema::hasColumn('invoices_reguler', 'va_briva_no'))   $updates['va_briva_no']   = config('bri.briva_no');
+            if (Schema::hasColumn('invoices_reguler', 'va_full'))       $updates['va_full']       = $briva->makeFullVa($custCode);
+            if (Schema::hasColumn('invoices_reguler', 'va_expired_at')) $updates['va_expired_at'] = $expired;
+
+            if (!empty($updates)) {
+                $invoice->update($updates);
+            }
+        } catch (\Throwable $e) {
+            // Jangan memblokir flow user; cukup catat log
+            logger()->warning('[BRIVA][createVa:REGULER] gagal', [
+                'invoice_id' => $invoice->id ?? null,
+                'error'      => $e->getMessage(),
+            ]);
+        }
     }
 }

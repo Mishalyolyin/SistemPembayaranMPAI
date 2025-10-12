@@ -5,28 +5,61 @@
   @php
     use Illuminate\Support\Facades\Route;
 
-    $mhs = ($mahasiswaReguler ?? $mahasiswa ?? auth()->user());
+    // Ambil user reguler dengan fallback aman
+    $mhs = ($mahasiswaReguler ?? $mahasiswa ?? auth('mahasiswa_reguler')->user() ?? auth()->user());
 
-    $indexRoute = Route::has('mahasiswa_reguler.invoice.index')
-      ? 'mahasiswa_reguler.invoice.index'
-      : (Route::has('reguler.invoices.index') ? 'reguler.invoices.index' : 'reguler.invoice.index');
+    // ===== Index (prefer singular; fallback plural/legacy) =====
+    $indexRoute = null;
+    foreach ([
+      'mahasiswa_reguler.invoice.index',
+      'reguler.invoice.index',
+      'mahasiswa_reguler.invoices.index', // legacy
+      'reguler.invoices.index',           // legacy
+    ] as $cand) {
+      if (Route::has($cand)) { $indexRoute = $cand; break; }
+    }
 
-    $pickPlanRoute = Route::has('mahasiswa_reguler.angsuran.form')
-      ? 'mahasiswa_reguler.angsuran.form'
-      : (Route::has('reguler.invoice.setup') ? 'reguler.invoice.setup' : 'reguler.angsuran.create');
+    // ===== Form pilih angsuran (prefer singular; fallback legacy) =====
+    $pickPlanRoute = null;
+    foreach ([
+      'mahasiswa_reguler.angsuran.form',
+      'reguler.invoice.setup',
+      'reguler.angsuran.create', // legacy
+    ] as $cand) {
+      if (Route::has($cand)) { $pickPlanRoute = $cand; break; }
+    }
 
-    $uploadRoute = Route::has('mahasiswa_reguler.invoices.upload')
-      ? 'mahasiswa_reguler.invoices.upload'
-      : 'reguler.invoices.upload';
+    // ===== Upload & Reset (prefer singular; fallback legacy) =====
+    $uploadRoute = null;
+    foreach ([
+      'mahasiswa_reguler.invoice.upload',
+      'reguler.invoice.upload',
+      'mahasiswa_reguler.invoices.upload', // legacy
+      'reguler.invoices.upload',           // legacy
+    ] as $cand) {
+      if (Route::has($cand)) { $uploadRoute = $cand; break; }
+    }
 
-    $resetRoute = Route::has('mahasiswa_reguler.invoices.reset')
-      ? 'mahasiswa_reguler.invoices.reset'
-      : 'reguler.invoices.reset';
+    $resetRoute = null;
+    foreach ([
+      'mahasiswa_reguler.invoice.reset',
+      'reguler.invoice.reset',
+      'mahasiswa_reguler.invoices.reset', // legacy
+      'reguler.invoices.reset',           // legacy
+    ] as $cand) {
+      if (Route::has($cand)) { $resetRoute = $cand; break; }
+    }
 
-    $kwitansiRoute = Route::has('mahasiswa_reguler.invoice.kwitansi.form')
-      ? 'mahasiswa_reguler.invoice.kwitansi.form'
-      : (Route::has('reguler.invoice.kwitansi.form') ? 'reguler.invoice.kwitansi.form' : null);
+    // ===== Kwitansi form (prefer singular) =====
+    $kwitansiRoute = null;
+    foreach ([
+      'mahasiswa_reguler.invoice.kwitansi.form',
+      'reguler.invoice.kwitansi.form',
+    ] as $cand) {
+      if (Route::has($cand)) { $kwitansiRoute = $cand; break; }
+    }
 
+    // Path bukti (bisa di dua lokasi)
     $buktiPath = null;
     if (!empty($invoice->bukti_pembayaran)) {
       $buktiPath = asset('storage/' . ltrim($invoice->bukti_pembayaran, '/'));
@@ -34,6 +67,7 @@
       $buktiPath = asset('storage/bukti_reguler/' . ltrim($invoice->bukti, '/'));
     }
 
+    // Status & tombol reset
     $status = $invoice->status ?? 'Belum';
     $showReset = ($buktiPath || in_array($status, ['Menunggu Verifikasi','Ditolak']))
                  && !in_array($status, ['Lunas','Lunas (Otomatis)']);
@@ -41,7 +75,7 @@
 
   <div class="d-flex justify-content-between align-items-center mb-3">
     <h4 class="mb-0">Detail Tagihan SKS</h4>
-    <a href="{{ route($indexRoute) }}" class="btn btn-outline-secondary">Kembali</a>
+    <a href="{{ $indexRoute ? route($indexRoute) : url('/reguler/invoice') }}" class="btn btn-outline-secondary">Kembali</a>
   </div>
 
   @if (session('success'))
@@ -59,7 +93,9 @@
   @if (empty($mhs?->angsuran))
     <div class="alert alert-warning">
       Anda belum memilih skema angsuran. Silakan tentukan terlebih dahulu.
-      <a href="{{ route($pickPlanRoute) }}" class="alert-link">Pilih Angsuran</a>
+      @if($pickPlanRoute)
+        <a href="{{ route($pickPlanRoute) }}" class="alert-link">Pilih Angsuran</a>
+      @endif
     </div>
   @endif
 
@@ -119,8 +155,9 @@
       @endif
 
       @if(!in_array($status, ['Lunas','Lunas (Otomatis)']))
-        {{-- FORM UPLOAD (sendiri) --}}
-        <form action="{{ route($uploadRoute, $invoice->id) }}" method="POST" enctype="multipart/form-data" class="row g-3" id="uploadForm">
+        {{-- FORM UPLOAD --}}
+        <form action="{{ $uploadRoute ? route($uploadRoute, $invoice->id) : url('/reguler/invoice/'.$invoice->id.'/upload') }}"
+              method="POST" enctype="multipart/form-data" class="row g-3" id="uploadForm">
           @csrf
           <div class="col-md-8">
             <input
@@ -143,7 +180,8 @@
         {{-- FORM RESET (terpisah, tidak nested) --}}
         @if($showReset)
           <div class="mt-2">
-            <form action="{{ route($resetRoute, $invoice->id) }}" method="POST" class="d-inline" id="resetForm">
+            <form action="{{ $resetRoute ? route($resetRoute, $invoice->id) : url('/reguler/invoice/'.$invoice->id.'/reset') }}"
+                  method="POST" class="d-inline" id="resetForm">
               @csrf
               <button class="btn btn-warning"
                       onclick="return confirm('Reset bukti & status invoice ke \"Belum\"?')">

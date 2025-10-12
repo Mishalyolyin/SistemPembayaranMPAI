@@ -21,7 +21,8 @@ return new class extends Migration
             $table->unsignedSmallInteger('angsuran_ke')->nullable()->index(); // urutan 1..N (baru)
 
             // Nominal & status
-            $table->integer('jumlah');
+            $table->unsignedBigInteger('amount');
+
             $table->enum('status', ['Belum', 'Menunggu Verifikasi', 'Lunas', 'Ditolak'])
                   ->default('Belum');
 
