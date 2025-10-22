@@ -1,0 +1,128 @@
+openapi: 3.0.3
+info:
+  title: Sistem Pembayaran SKS — Eligibility API
+  version: "1.0.0"
+  description: |
+    API untuk menarik (pull) kelayakan pembayaran berdasarkan NIM atau cust code.
+    Semua endpoint berada di bawah prefix `/api` dan diamankan dengan Bearer token.
+servers:
+  - url: https://sistemkeuanganakademik.com
+    description: Production
+security:
+  - bearerAuth: []
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    EligibilityResponse:
+      type: object
+      required: [eligible]
+      properties:
+        eligible:
+          type: boolean
+          description: Apakah ada angsuran aktif untuk dibayar (one-active, no-skip).
+        reason:
+          type: string
+          description: Alasan jika tidak eligible (mis. tidak ditemukan, sudah lunas, rate-limited, dsb.).
+        va:
+          type: object
+          nullable: true
+          properties:
+            cust_code:
+              type: string
+            briva_no:
+              type: string
+            full:
+              type: string
+        request_id:
+          type: string
+          description: Optional. X-Request-Id jika middleware diaktifkan.
+paths:
+  /api/spectate/eligibility:
+    get:
+      summary: Cek kelayakan (eligibility) berdasarkan NIM
+      operationId: getEligibilityByNim
+      tags: [Eligibility]
+      parameters:
+        - in: query
+          name: nim
+          required: true
+          schema:
+            type: string
+          description: NIM (digit saja). Sistem akan membersihkan non-digit, lalu memakai NIM untuk matching.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EligibilityResponse'
+              examples:
+                example:
+                  value:
+                    eligible: true
+                    va:
+                      cust_code: "1234567890"
+                      briva_no: "39012345"
+                      full: "390123451234567890"
+        '401':
+          description: Unauthorized (token salah/absen)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+              examples:
+                example:
+                  value: { "message": "Unauthorized" }
+        '403':
+          description: Forbidden (IP tidak di-whitelist, jika whitelist diaktifkan)
+        '422':
+          description: Unprocessable Entity (parameter salah/missing)
+        '429':
+          description: Too Many Requests (kena throttle:spectate)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+              examples:
+                example:
+                  value: { "message": "Too Many Requests" }
+  /api/spectate/eligibility/by-cust:
+    get:
+      summary: Cek kelayakan (eligibility) berdasarkan cust code
+      operationId: getEligibilityByCust
+      tags: [Eligibility]
+      parameters:
+        - in: query
+          name: cust
+          required: true
+          schema:
+            type: string
+          description: Cust code (digit saja). Sistem akan membersihkan non-digit sebelum dipakai.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EligibilityResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '422':
+          description: Unprocessable Entity
+        '429':
+          description: Too Many Requests
